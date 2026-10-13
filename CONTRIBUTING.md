@@ -19,7 +19,7 @@ You don't need a second machine or a real agent for UI work: `pnpm dev` in `Host
 | `HostLens-program/`         | `pnpm build` (typechecks the app and the agent API types) |
 | `HostLens-program/src-tauri`| `cargo test` (`cargo test -- --ignored` also hits a live FiveM server) |
 
-CI runs these on Windows and Linux for every push and pull request.
+CI runs these on the maintainers' self-hosted runners for every push and same-repo pull request. Pull requests from forks don't trigger CI; run the checks locally and a maintainer will run them after review.
 
 ## Where things live
 

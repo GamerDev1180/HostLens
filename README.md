@@ -357,4 +357,4 @@ cargo test                    # offline tests
 cargo test -- --ignored       # also queries a live public FiveM server and the Cfx.re API
 ```
 
-GitHub Actions runs the same checks on Windows and Linux for every push and pull request (`.github/workflows/ci.yml`). Pushing a `v*` tag builds Windows and Linux installers plus an agent archive into a draft release (`release.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md).
+GitHub Actions runs the same checks for every push and same-repo pull request on **self-hosted runners** (`.github/workflows/ci.yml`): Windows by default, plus Linux when the repository variable `CI_PLATFORMS` is `["windows","linux"]`. Pull requests from forks don't run CI, so nobody else's code runs on those machines. Pushing a `v*` tag builds Windows and Linux installers plus an agent archive into a draft release (`release.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,11 +1,20 @@
-# Typechecks and tests the agent and the app on Windows and Linux, so
-# platform-specific code (PowerShell vs /proc collectors) is exercised on both.
+# Typechecks and tests the agent and the app on our own (self-hosted) runners,
+# so platform-specific code (PowerShell vs /proc collectors) runs on real
+# machines and logs stay on hand (runner's _diag folder + the Actions tab).
+#
+# Platforms: Windows always. Add Linux once a Linux runner is registered by
+# setting the repository variable CI_PLATFORMS to ["windows","linux"]
+# (Settings → Secrets and variables → Actions → Variables).
+#
+# The repo is public: jobs never run for pull requests from forks, because
+# that would execute a stranger's code on our machines.
 name: CI
 
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,20 +27,21 @@ env:
 jobs:
   agent:
     name: Agent (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: ${{ fromJSON(vars.CI_PLATFORMS || '["windows"]') }}
+    runs-on: ${{ matrix.os == 'linux' && fromJSON('["self-hosted","Linux"]') || fromJSON('["self-hosted","Windows"]') }}
     defaults:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
       # agent/pnpm-lock.yaml isn't committed yet; once it is, switch to --frozen-lockfile.
@@ -43,32 +53,38 @@ jobs:
 
   app:
     name: App (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: ${{ fromJSON(vars.CI_PLATFORMS || '["windows"]') }}
+    runs-on: ${{ matrix.os == 'linux' && fromJSON('["self-hosted","Linux"]') || fromJSON('["self-hosted","Windows"]') }}
+    env:
+      # Outside the workspace, which checkout wipes each run, so incremental
+      # Rust builds survive between runs on the same machine.
+      CARGO_TARGET_DIR: ${{ runner.tool_cache }}/hostlens-target
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: HostLens-program/pnpm-lock.yaml
 
-      - name: Install Tauri system dependencies
+      # Self-hosted Linux: only installs what's missing (needs passwordless sudo
+      # the first time, or install these by hand once).
+      - name: Tauri system dependencies
         if: runner.os == 'Linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev build-essential
+          pkgs="libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev build-essential"
+          missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+          if [ -n "$missing" ]; then
+            sudo apt-get update && sudo apt-get install -y $missing
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: HostLens-program/src-tauri -> target
 
       - name: Install
         working-directory: HostLens-program
