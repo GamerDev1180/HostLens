@@ -125,6 +125,26 @@ function metrics(h: DemoHost): MetricsResponse {
         { name: "Tailscale", receivedBytes: h.rx * 0.03, sentBytes: h.tx * 0.03 },
       ],
     },
+    gpus:
+      h.info.platform === "win32"
+        ? [
+            {
+              index: 0,
+              name: "NVIDIA GeForce GTX 1650",
+              vendor: "nvidia" as const,
+              utilizationPercent: Math.round(Math.min(100, Math.max(0, h.cpu * 1.4 + (Math.random() - 0.5) * 20))),
+              memoryTotalBytes: 4 * GB,
+              memoryUsedBytes: (1.1 + h.cpu / 40) * GB,
+              temperatureC: Math.round(38 + h.cpu / 3),
+              powerDrawW: Math.round((12 + h.cpu * 0.8) * 10) / 10,
+              powerLimitW: 75,
+              fanPercent: Math.round(30 + h.cpu / 3),
+              coreClockMhz: 1485,
+              memoryClockMhz: 4001,
+              driverVersion: "617.42",
+            },
+          ]
+        : [],
     uptimeSeconds: Math.floor((Date.now() - Date.parse(h.info.bootTime)) / 1000),
   };
 }
@@ -215,6 +235,47 @@ function connections(): ConnectionsResponse {
   return { timestamp: new Date().toISOString(), connections: list, listening };
 }
 
+async function diagnostic(req: Record<string, unknown>) {
+  const target = String(req.target);
+  const base = { target, startedAt: new Date().toISOString() };
+  const isDown = target.includes("203.0.113");
+  await new Promise((r) => setTimeout(r, req.type === "traceroute" ? 1500 : 600));
+  if (req.type === "ping") {
+    const count = Number(req.count ?? 5);
+    const samples = Array.from({ length: count }, (_, i) => (isDown || (i === 3 && count > 4) ? null : 7 + Math.round(Math.random() * 6)));
+    const ok = samples.filter((s): s is number => s !== null);
+    return {
+      ...base, type: "ping", durationMs: count * 220, address: "1.1.1.1", sent: count, received: ok.length,
+      lossPercent: Math.round(((count - ok.length) / count) * 1000) / 10, samples,
+      minMs: ok.length ? Math.min(...ok) : null, avgMs: ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null,
+      maxMs: ok.length ? Math.max(...ok) : null, jitterMs: ok.length > 1 ? 1.7 : null,
+    };
+  }
+  if (req.type === "traceroute") {
+    const path: [string | null, string | null, number | null, "lan" | "internet" | null][] = [
+      ["192.168.178.1", "fritz.box", 3, "lan"],
+      ["100.65.0.4", null, 7, "lan"],
+      ["45.145.109.92", "ve25.hil-redb-ipr02.tnoc.nl", 8, "internet"],
+      [null, null, null, null],
+      ["80.249.211.140", "ams-ix.as13335.net", 9, "internet"],
+      ["1.1.1.1", "one.one.one.one", 8, "internet"],
+    ];
+    const hops = (isDown ? path.slice(0, 3).concat([[null, null, null, null], [null, null, null, null]]) : path).map(([address, host, rttMs, scope], i) => ({ ttl: i + 1, address, host, rttMs, scope }));
+    return { ...base, type: "traceroute", durationMs: 1400, address: isDown ? target : "1.1.1.1", hops, reached: !isDown };
+  }
+  if (req.type === "dns") {
+    return {
+      ...base, type: "dns", durationMs: 30, servers: ["192.168.178.1"],
+      resolver: { addresses: ["162.159.138.232", "162.159.137.232"], durationMs: 14, error: null },
+      system: { addresses: ["162.159.138.232", "162.159.137.232"], durationMs: 3, error: null },
+    };
+  }
+  return {
+    ...base, type: "tcp", durationMs: 20, address: target, port: Number(req.port),
+    connected: !isDown, connectMs: isDown ? 5000 : 18, error: isDown ? "timed out" : null,
+  };
+}
+
 const devices: DeviceInfo[] = [
   { id: "d1", name: "HostLens on Windows", createdAt: new Date(Date.now() - 9 * DAY).toISOString(), lastSeenAt: new Date().toISOString(), current: true },
   { id: "d2", name: "HostLens on Android", createdAt: new Date(Date.now() - 2 * DAY).toISOString(), lastSeenAt: new Date(Date.now() - 3 * HOUR).toISOString(), current: false },
@@ -281,6 +342,7 @@ mockIPC((cmd, payload) => {
       }
       if (route === "GET /api/v1/metrics/connections") return connections();
       if (route === "GET /api/v1/devices") return devices;
+      if (route === "POST /api/v1/diagnostics") return diagnostic(args.body as unknown as Record<string, unknown>);
       if (route === "POST /api/v1/pairing-codes") {
         const urls = ["http://192.168.1.21:47821", "http://100.88.1.21:47821"];
         const params = new URLSearchParams();

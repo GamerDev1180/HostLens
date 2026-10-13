@@ -9,7 +9,9 @@ import type {
     MetricsResponse,
     PairingCodeResponse,
     PairResponse,
+    PingResult,
     ProcessesResponse,
+    TcpResult,
 } from '../types.ts';
 
 // These tests run against the real collectors of whatever OS runs them, so they
@@ -99,6 +101,11 @@ describe('GET /api/v1/metrics', () => {
         const m = (await res.json()) as MetricsResponse;
 
         expect(Number.isNaN(Date.parse(m.timestamp))).toBe(false);
+        expect(Array.isArray(m.gpus)).toBe(true);
+        for (const g of m.gpus) {
+            expect(g.name).toEqual(expect.any(String));
+            expect(g.utilizationPercent === null || isPercent(g.utilizationPercent)).toBe(true);
+        }
         expect(m.uptimeSeconds).toBeGreaterThan(0);
 
         expect(isPercent(m.cpu.usagePercent)).toBe(true);
@@ -185,6 +192,47 @@ describe('GET /api/v1/metrics/connections', () => {
             expect(l.port).toBeGreaterThanOrEqual(0);
             expect(typeof l.exposed).toBe('boolean');
         }
+    });
+});
+
+describe('POST /api/v1/diagnostics', () => {
+    const run = (body: unknown) =>
+        app.request('/api/v1/diagnostics', {
+            method: 'POST',
+            headers: { ...auth, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+
+    it.each([
+        [{ type: 'ping', target: 'x; rm -rf /' }, 'target'],
+        [{ type: 'ping', target: '1.1.1.1', count: 50 }, 'count'],
+        [{ type: 'tcp', target: '1.1.1.1', port: 0 }, 'port'],
+        [{ type: 'nmap', target: '1.1.1.1' }, 'type'],
+    ])('rejects %j', async (body, field) => {
+        const res = await run(body);
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { error: string }).error).toContain(field);
+    });
+
+    it('pings localhost', { timeout: 20_000 }, async () => {
+        const res = await run({ type: 'ping', target: '127.0.0.1', count: 2 });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as PingResult;
+        expect(body).toEqual(expect.objectContaining({ type: 'ping', address: '127.0.0.1', sent: 2, received: 2, lossPercent: 0 }));
+        expect(body.samples.every((s) => typeof s === 'number')).toBe(true);
+    });
+
+    it('reports a refused TCP port as a result, not an error', { timeout: 10_000 }, async () => {
+        const res = await run({ type: 'tcp', target: '127.0.0.1', port: 1 });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as TcpResult;
+        expect(body.connected).toBe(false);
+        expect(body.error).toEqual(expect.any(String));
+    });
+
+    it('refuses DNS lookups of IP addresses', async () => {
+        const res = await run({ type: 'dns', target: '1.1.1.1' });
+        expect(res.status).toBe(422);
     });
 });
 

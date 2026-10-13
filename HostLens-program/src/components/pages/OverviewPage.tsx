@@ -130,6 +130,9 @@ export function OverviewPage(props: Props) {
                     <Gauge size={72} value={s.metrics?.cpu?.usagePercent ?? null} label="CPU" />
                     <Gauge size={72} value={s.metrics?.memory?.usagePercent ?? null} label="RAM" />
                     <Gauge size={72} value={peakDisk(s)} label="Disk" />
+                    {s.metrics?.gpus?.[0] && (
+                      <Gauge size={72} value={s.metrics.gpus[0].utilizationPercent} label="GPU" color="var(--accent)" />
+                    )}
                   </div>
                   <AreaChart
                     series={[{ label: "CPU", values: s.cpuHistory, color: "var(--accent)" }]}

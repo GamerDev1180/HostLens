@@ -10,7 +10,16 @@ import {
     parseProcStat,
 } from '../collectors/linux.ts';
 import { parseNetstat, parseSockets } from '../collectors/windows.ts';
+import { parseNvidiaSmi } from '../collectors/gpu.ts';
 import { PairingCodes } from '../devices.ts';
+import {
+    parseLinuxPing,
+    parseTracepath,
+    parseTraceroute,
+    parseWindowsTrace,
+    summarizePing,
+    validateTarget,
+} from '../diagnostics.ts';
 import { agentUrls, localOnly, pairingLink } from '../pairing.ts';
 
 // Platform parsers tested against captured file/command output, so the Linux
@@ -196,6 +205,121 @@ describe('pairing', () => {
         const codes = new PairingCodes();
         const { code } = codes.create(0);
         expect(codes.consume(code, 10 * 60_000 + 1)).toBe('invalid');
+    });
+});
+
+describe('gpu', () => {
+    it('parses nvidia-smi CSV, treating N/A as unknown', () => {
+        const csv = [
+            '0, NVIDIA GeForce GTX 1650, 18, 4096, 1082, 32, 7.41, 75.00, 30, 375, 405, 617.42',
+            '1, Tesla T4, 97, 15360, 15000, 71, [N/A], 70.00, [Not Supported], 1590, 5000, 535.104.05',
+            '',
+        ].join('\r\n');
+        const MIB = 1024 * 1024;
+        expect(parseNvidiaSmi(csv)).toEqual([
+            {
+                index: 0,
+                name: 'NVIDIA GeForce GTX 1650',
+                vendor: 'nvidia',
+                utilizationPercent: 18,
+                memoryTotalBytes: 4096 * MIB,
+                memoryUsedBytes: 1082 * MIB,
+                temperatureC: 32,
+                powerDrawW: 7.41,
+                powerLimitW: 75,
+                fanPercent: 30,
+                coreClockMhz: 375,
+                memoryClockMhz: 405,
+                driverVersion: '617.42',
+            },
+            expect.objectContaining({ index: 1, name: 'Tesla T4', powerDrawW: null, fanPercent: null, temperatureC: 71 }),
+        ]);
+        expect(parseNvidiaSmi('')).toEqual([]);
+    });
+});
+
+describe('diagnostics', () => {
+    it('accepts hostnames and IPs only', () => {
+        expect(validateTarget('example.com')).toBe('example.com');
+        expect(validateTarget(' 1.1.1.1 ')).toBe('1.1.1.1');
+        expect(validateTarget('2606:4700::1111')).toBe('2606:4700::1111');
+        expect(validateTarget('my-host')).toBe('my-host');
+        for (const bad of ['-c 99 x', 'a b', 'x;rm -rf /', "x' ; calc", 'http://x', '', 'a'.repeat(254), 5]) {
+            expect(validateTarget(bad)).toBeNull();
+        }
+    });
+
+    it('summarizes ping samples', () => {
+        expect(summarizePing('t', '1.1.1.1', [10, null, 14, 12])).toEqual({
+            type: 'ping',
+            target: 't',
+            address: '1.1.1.1',
+            sent: 4,
+            received: 3,
+            lossPercent: 25,
+            samples: [10, null, 14, 12],
+            minMs: 10,
+            avgMs: 12,
+            maxMs: 14,
+            jitterMs: 3,
+        });
+        expect(summarizePing('t', 'x', [null, null])).toEqual(expect.objectContaining({ lossPercent: 100, avgMs: null, jitterMs: null }));
+    });
+
+    it('parses Linux ping output', () => {
+        const out = [
+            'PING 1.1.1.1 (1.1.1.1) 56(84) bytes of data.',
+            '64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=7.12 ms',
+            '64 bytes from 1.1.1.1: icmp_seq=3 ttl=57 time=6.80 ms',
+            '',
+            '--- 1.1.1.1 ping statistics ---',
+            '3 packets transmitted, 2 received, 33.3333% packet loss, time 502ms',
+        ].join('\n');
+        expect(parseLinuxPing(out, 3)).toEqual([7.12, null, 6.8]);
+    });
+
+    it('parses traceroute and tracepath output', () => {
+        const traceroute = [
+            'traceroute to 1.1.1.1 (1.1.1.1), 20 hops max, 60 byte packets',
+            ' 1  192.168.1.1  0.512 ms',
+            ' 2  *',
+            ' 3  1.1.1.1  7.204 ms',
+        ].join('\n');
+        expect(parseTraceroute(traceroute)).toEqual([
+            { ttl: 1, address: '192.168.1.1', rttMs: 0.512 },
+            { ttl: 2, address: null, rttMs: null },
+            { ttl: 3, address: '1.1.1.1', rttMs: 7.204 },
+        ]);
+        const tracepath = [
+            ' 1?: [LOCALHOST]                      pmtu 1500',
+            ' 1:  192.168.1.1                                           0.411ms ',
+            ' 1:  192.168.1.1                                           0.380ms ',
+            ' 2:  no reply',
+            ' 3:  1.1.1.1                                               7.012ms reached',
+            '     Resume: pmtu 1500 hops 3 back 3 ',
+        ].join('\n');
+        expect(parseTracepath(tracepath)).toEqual([
+            { ttl: 1, address: '192.168.1.1', rttMs: 0.411 },
+            { ttl: 2, address: null, rttMs: null },
+            { ttl: 3, address: '1.1.1.1', rttMs: 7.012 },
+        ]);
+    });
+
+    it('maps Windows TTL-probe results', () => {
+        expect(
+            parseWindowsTrace([
+                { Ttl: 1, Status: 'TtlExpired', Address: '192.168.178.1', Ms: 4 },
+                { Ttl: 2, Status: 'TimedOut', Address: null, Ms: 1000 },
+                { Ttl: 3, Status: 'Success', Address: '1.1.1.1', Ms: 7 },
+            ]),
+        ).toEqual({
+            hops: [
+                { ttl: 1, address: '192.168.178.1', rttMs: 4 },
+                { ttl: 2, address: null, rttMs: null },
+                { ttl: 3, address: '1.1.1.1', rttMs: 7 },
+            ],
+            reached: true,
+        });
     });
 });
 

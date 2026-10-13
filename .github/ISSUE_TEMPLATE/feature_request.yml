@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest something HostLens should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [FUTURE.md](../blob/master/FUTURE.md) first; your idea may already be planned. HostLens aims to stay a simple, local-first PC and server diagnostics tool, so not every feature fits.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Which platforms does it concern?
+      multiple: true
+      options:
+        - Windows
+        - Linux
+        - Android app
+        - All
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself

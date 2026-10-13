@@ -27,6 +27,7 @@ const emptyState = (): AgentState => ({
   memHistory: [],
   netRxHistory: [],
   netTxHistory: [],
+  gpuHistory: [],
   lastUpdated: null,
 });
 
@@ -135,6 +136,14 @@ export function useAgents() {
               memHistory: pushHistory(old.memHistory, metrics.memory?.usagePercent ?? null),
               netRxHistory: pushHistory(old.netRxHistory, netRxRate),
               netTxHistory: pushHistory(old.netTxHistory, netTxRate),
+              // Older agents don't send `gpus`.
+              gpuHistory: (metrics.gpus ?? []).map((g, i) => ({
+                util: pushHistory(old.gpuHistory[i]?.util ?? [], g.utilizationPercent),
+                vram: pushHistory(
+                  old.gpuHistory[i]?.vram ?? [],
+                  g.memoryTotalBytes && g.memoryUsedBytes !== null ? (g.memoryUsedBytes / g.memoryTotalBytes) * 100 : null,
+                ),
+              })),
               lastUpdated: Date.now(),
             },
           };

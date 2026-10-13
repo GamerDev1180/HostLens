@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in the agent or the app doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **remove tokens, pairing codes and Discord webhook URLs** from anything you paste.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where is the problem?
+      options:
+        - Agent (metrics, pairing, diagnostics, CLI)
+        - App (UI, monitors, alerts, reports)
+        - FiveM monitoring
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the agent with `pnpm start`
+        2. In the app, open …
+        3. …
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Agent version (from `GET /health` or the startup line) and app version.
+      placeholder: agent 1.3.0, app 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system(s)
+      description: Where the agent runs and where the app runs.
+      placeholder: Agent on Ubuntu 24.04, app on Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error messages
+      description: Agent console output, or the error shown in the app.
+      render: text

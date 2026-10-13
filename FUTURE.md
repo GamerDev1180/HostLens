@@ -42,6 +42,19 @@ The phone runs **only the HostLens app**: it connects to agents on PCs and serve
 - Network monitor: bytes per connection/process (needs ETW on Windows, admin rights; `ss -ti` / eBPF on Linux), country of remote addresses (would need an offline GeoIP database), and alerts for new listening ports.
 - HTTPS (or certificate pinning in the pairing QR) for agents used across untrusted networks; today traffic is plain HTTP and relies on LAN/VPN.
 
+## Roadmap (from the diagnostics review)
+
+Done: Windows/Linux CI and a release workflow, NVIDIA GPU metrics, network diagnostics (ping, traceroute, DNS, TCP, connectivity check). Next, roughly in order:
+
+- **Diagnostics export**: a ZIP with system info, recent metrics/reports, alert history and a config summary, with tokens and webhook URLs removed.
+- **Incident timeline**: one chronological feed of host disconnects, monitor outages, resource alerts and recoveries.
+- **Disk performance**: read/write throughput and latency; longer CPU/RAM/network history to compare with earlier hours or days (baselines).
+- **GPU**: AMD/Intel (Linux sysfs, Windows performance counters), GPU temperature alerts.
+- **Smarter alerts**: cooldowns, maintenance windows, grouping related incidents, baseline-based alerts.
+- **FiveM performance mode**: player/resource trends; optional server-side data where the owner allows it.
+- **Background agent**: optional Windows service and tray icon (pause, open dashboard).
+- **Contributor tooling**: structured agent logs, settings import/export (secrets removed), signed auto-updates.
+
 ## Release v0.1.0
 
 - Screenshots in the README.

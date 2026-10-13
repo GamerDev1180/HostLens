@@ -1,0 +1,86 @@
+# Typechecks and tests the agent and the app on Windows and Linux, so
+# platform-specific code (PowerShell vs /proc collectors) is exercised on both.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 10.22.0
+  NODE_VERSION: 24
+
+jobs:
+  agent:
+    name: Agent (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # agent/pnpm-lock.yaml isn't committed yet; once it is, switch to --frozen-lockfile.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      # Runs against the runner's real OS: metrics, processes, connections and
+      # local diagnostics (ping 127.0.0.1) on each platform.
+      - run: pnpm test
+
+  app:
+    name: App (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: HostLens-program/pnpm-lock.yaml
+
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev build-essential
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: HostLens-program/src-tauri -> target
+
+      - name: Install
+        working-directory: HostLens-program
+        run: pnpm install --frozen-lockfile
+
+      # `tsc && vite build`: typechecks the frontend (including the agent's API
+      # types it imports) and produces dist/, which the Rust build embeds.
+      - name: Build frontend
+        working-directory: HostLens-program
+        run: pnpm build
+
+      # Offline tests only; the network tests (--ignored) need a live FiveM server.
+      - name: Rust tests
+        working-directory: HostLens-program/src-tauri
+        run: cargo test --locked

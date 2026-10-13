@@ -65,7 +65,7 @@ pnpm test            # API contract + parser tests
 The first time it starts (while no device is paired yet) the agent prints a **pairing QR code**:
 
 ```
-HostLens agent 1.2.0 listening on http://127.0.0.1:47821
+HostLens agent 1.3.0 listening on http://127.0.0.1:47821
 Master token: stored in C:\Users\you\AppData\Roaming\HostLens\agent-token
 
   Scan with the HostLens app to pair a device:
@@ -124,6 +124,7 @@ All responses are JSON. Errors have the shape `{ "error": "<message>" }` (`400` 
 | POST   | `/api/v1/pair`                | code | Trade a pairing code for a device token         |
 | GET    | `/api/v1/devices`             | yes  | List paired devices                             |
 | DELETE | `/api/v1/devices/:id`         | yes  | Remove a device (its token stops working)       |
+| POST   | `/api/v1/diagnostics`         | yes  | Run a ping, traceroute, DNS or TCP test         |
 
 The response types are defined in [`agent/types.ts`](agent/types.ts).
 
@@ -186,6 +187,7 @@ The response types are defined in [`agent/types.ts`](agent/types.ts).
 | `network.receivedBytes`  | `number`         | Bytes received since boot, all non-loopback interfaces                                          |
 | `network.sentBytes`      | `number`         | Bytes sent since boot, all non-loopback interfaces                                              |
 | `network.interfaces[]`   | `array`          | Per interface: `name`, `receivedBytes`, `sentBytes` (empty if only totals are available)        |
+| `gpus[]`                 | `array`          | NVIDIA GPUs (via `nvidia-smi`): `index`, `name`, `vendor`, `utilizationPercent`, `memoryTotalBytes`, `memoryUsedBytes`, `temperatureC`, `powerDrawW`, `powerLimitW`, `fanPercent`, `coreClockMhz`, `memoryClockMhz`, `driverVersion`; any field is `null` if not reported. Empty without a supported GPU. Refreshed in the background at most every 2 s. Missing before agent 1.3 |
 | `uptimeSeconds`          | `number`         | System uptime, in seconds                                                                       |
 
 ```json
@@ -269,6 +271,24 @@ Where the machine's traffic goes: every TCP connection with its owning process, 
 
 On Windows this comes from `Get-NetTCPConnection`/`Get-NetUDPEndpoint` (state names don't depend on the UI language; ~0.3–0.5 s per call). On Linux from `/proc/net/{tcp,tcp6,udp,udp6}`, with owners found via `/proc/<pid>/fd`. Per-connection byte counts aren't available without admin rights, so the app shows connection counts per destination and process, and total throughput from `/metrics`.
 
+#### `POST /api/v1/diagnostics`
+
+Runs one network test **from the agent's machine**, to tell whether a problem is local, DNS or along the route. Body:
+
+| `type`       | Extra fields               | Result                                                                                              |
+| ------------ | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ping`       | `count` 1–10 (default 5)   | `address`, `sent`, `received`, `lossPercent`, `samples` (ms per probe, `null` = lost), `minMs`, `avgMs`, `maxMs`, `jitterMs` |
+| `traceroute` | –                          | `address`, `hops[]` (`ttl`, `address`, `host` from reverse DNS, `rttMs`, `scope`), `reached`         |
+| `dns`        | –                          | `servers`, `resolver` (direct A/AAAA query) and `system` (OS lookup incl. hosts file): `addresses`, `durationMs`, `error` |
+| `tcp`        | `port` 1–65535             | `address`, `connected`, `connectMs`, `error`                                                         |
+
+Every body needs a `target`: a hostname or IP. Every result also has `type`, `target`, `startedAt` and `durationMs`.
+
+- Names are resolved first; an unresolvable name returns `422` with the DNS error code. A refused or unreachable TCP port is a result (`connected: false`), not an error.
+- No admin rights needed. On Windows, ping and traceroute use .NET's `Ping` class through PowerShell (TTL-limited probes for the route), so output doesn't depend on the UI language. On Linux they use `ping` and `traceroute` (or `tracepath`) with `LC_ALL=C`.
+- Only a validated IP literal reaches a command line, and nothing runs through a shell.
+- One test runs at a time per agent (`429` otherwise). A traceroute takes up to ~20 s on a bad route (20 hops, 1 s timeout each).
+
 #### Pairing endpoints
 
 - `POST /api/v1/pairing-codes` → `201 { code, expiresAt, urls, link, localOnly }`. `link` is what the QR code encodes. `localOnly` is true when the agent only listens on 127.0.0.1, so other devices can't reach it.
@@ -285,8 +305,9 @@ The interface follows the layout of [Reach](https://github.com/alexandrosnt/Reac
 
 - **Overview:** greeting with a one-line health summary; tiles for hosts online, monitors up, FiveM players online and active alerts; a card per host (CPU/RAM/disk gauges and a CPU chart) and per monitor (players, response time, 24 h uptime and an hourly uptime strip); recent alerts.
 - **Hosts** (agents): add by **pairing**. Scan the agent's QR code (phone), or paste its pairing link or type its code (desktop). The app gets its own revocable token. The master token can still be entered by hand. Each host is polled once per second. The host page has three tabs:
-  - **Overview:** gauges (CPU, memory, swap/page file, fullest disk), uptime, live network rates and load average, interactive 60-second charts for CPU, memory and network (hover for values), per-interface rates, disks, system info, a top-10 process table (by CPU or memory, every 2 s) and a per-core heat grid.
+  - **Overview:** gauges (CPU, memory, swap/page file, fullest disk), uptime, live network rates and load average, interactive 60-second charts for CPU, memory and network (hover for values), a GPU card (load, VRAM, temperature, power, fan, clocks and a history chart, NVIDIA for now), per-interface rates, disks, system info, a top-10 process table (by CPU or memory, every 2 s) and a per-core heat grid.
   - **Network:** where the traffic goes. Shows connection counts (internet, local network, this machine) and open TCP ports reachable from other machines. *Top destinations* groups outgoing connections by domain (from reverse DNS) and incoming ones by service, e.g. "Clients of FiveM (:30120)". *By process* lists which programs hold connections. There's a searchable connection table (process, remote host, service, direction, state) and a list of listening ports. Polled every 3 s while the tab is open.
+  - **Diagnostics:** a one-click **connectivity check** traces the route to 1.1.1.1, pings it and resolves google.com. It then says in plain words whether the problem is the local network (router not answering), the internet connection (and at which hop traffic stops), DNS, packet loss or high latency. Separate ping, traceroute, DNS and TCP-port tests show probe bars, hop lists with names and timing, and resolver results. All tests run on the host, not on the device running the app.
   - **Devices:** every device paired with that agent, with last-seen time and a remove button. **Pair device** in the header shows a single-use QR code for another device and confirms when it has paired.
 
   If an agent rejects the token (e.g. the device was removed), the page lets you enter a new one.
@@ -329,7 +350,11 @@ To add a host, start an agent first (see above), then use **Add host** and enter
 ### Tests
 
 ```sh
+cd agent && pnpm typecheck && pnpm test
+cd HostLens-program && pnpm build          # typechecks the app and the agent API types
 cd HostLens-program/src-tauri
 cargo test                    # offline tests
 cargo test -- --ignored       # also queries a live public FiveM server and the Cfx.re API
 ```
+
+GitHub Actions runs the same checks on Windows and Linux for every push and pull request (`.github/workflows/ci.yml`). Pushing a `v*` tag builds Windows and Linux installers plus an agent archive into a draft release (`release.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,0 +1,82 @@
+# Builds the app installers on Windows and Linux when a version tag is pushed
+# (git tag v0.1.0 && git push origin v0.1.0) and attaches them, plus an agent
+# archive, to a draft GitHub release for review before publishing.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PNPM_VERSION: 10.22.0
+  NODE_VERSION: 24
+
+jobs:
+  app:
+    name: App installers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: HostLens-program/pnpm-lock.yaml
+
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev build-essential
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: HostLens-program/src-tauri -> target
+
+      - name: Install
+        working-directory: HostLens-program
+        run: pnpm install --frozen-lockfile
+
+      # Builds dist/ via beforeBuildCommand, then the MSI/NSIS (Windows) or
+      # deb/rpm/AppImage (Linux) bundles, and uploads them to the draft release.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: HostLens-program
+          tagName: ${{ github.ref_name }}
+          releaseName: HostLens ${{ github.ref_name }}
+          releaseBody: See CHANGELOG / README for what's new. Installers are not code-signed yet.
+          releaseDraft: true
+          prerelease: false
+
+  agent:
+    name: Agent archive
+    runs-on: ubuntu-latest
+    needs: app
+    steps:
+      - uses: actions/checkout@v4
+      # The agent runs from source on Node.js; ship it without node_modules or tests.
+      - name: Package agent
+        run: |
+          mkdir -p dist/hostlens-agent
+          cp -r agent/*.ts agent/collectors agent/package.json agent/tsconfig.json dist/hostlens-agent/
+          [ -f agent/pnpm-lock.yaml ] && cp agent/pnpm-lock.yaml dist/hostlens-agent/ || true
+          cp README.md dist/hostlens-agent/
+          cd dist && tar czf hostlens-agent-${{ github.ref_name }}.tar.gz hostlens-agent && zip -qr hostlens-agent-${{ github.ref_name }}.zip hostlens-agent
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist/hostlens-agent-*.tar.gz dist/hostlens-agent-*.zip --clobber --repo "${{ github.repository }}"

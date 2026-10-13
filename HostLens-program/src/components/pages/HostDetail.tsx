@@ -22,11 +22,14 @@ import { Card, EmptyState, Meter, StatusPill } from "../ui/common";
 import { PairDeviceModal } from "../forms/PairDeviceModal";
 import { DevicesPanel } from "./DevicesPanel";
 import { NetworkPanel } from "./NetworkPanel";
+import { GpuPanel } from "./GpuPanel";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 
-type Tab = "overview" | "network" | "devices";
+type Tab = "overview" | "network" | "diagnostics" | "devices";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "network", label: "Network" },
+  { id: "diagnostics", label: "Diagnostics" },
   { id: "devices", label: "Devices" },
 ];
 
@@ -196,6 +199,14 @@ export function HostDetail({ subscription, state, onSetToken, onRemove, onBack }
             Connections are shown live while the agent is reachable.
           </EmptyState>
         )
+      ) : tab === "diagnostics" ? (
+        state.status === "offline" ? (
+          <EmptyState icon={Network} title="Host is offline">
+            Tests run on the host itself, so it has to be reachable.
+          </EmptyState>
+        ) : (
+          <DiagnosticsPanel subscription={subscription} />
+        )
       ) : tab === "devices" ? (
         <DevicesPanel subscription={subscription} onPair={() => setPairing(true)} />
       ) : !metrics ? (
@@ -262,6 +273,8 @@ export function HostDetail({ subscription, state, onSetToken, onRemove, onBack }
               />
             </Card>
           </div>
+
+          <GpuPanel state={state} />
 
           {metrics.network && (
             <Card title="Network throughput" icon={Network}>

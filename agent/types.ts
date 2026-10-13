@@ -61,6 +61,24 @@ export interface DiskMetrics {
     usagePercent: number;
 }
 
+export interface GpuMetrics {
+    index: number;
+    /** e.g. "NVIDIA GeForce GTX 1650" */
+    name: string;
+    vendor: 'nvidia';
+    /** Each field is `null` when the card or driver doesn't report it. */
+    utilizationPercent: number | null;
+    memoryTotalBytes: number | null;
+    memoryUsedBytes: number | null;
+    temperatureC: number | null;
+    powerDrawW: number | null;
+    powerLimitW: number | null;
+    fanPercent: number | null;
+    coreClockMhz: number | null;
+    memoryClockMhz: number | null;
+    driverVersion: string | null;
+}
+
 export interface NetworkInterfaceMetrics {
     name: string;
     receivedBytes: number;
@@ -89,6 +107,12 @@ export interface MetricsResponse {
     disk: DiskMetrics[];
     /** `null` if network counters aren't available on this platform. */
     network: NetworkMetrics | null;
+    /**
+     * Graphics cards. Empty when none is found or the vendor isn't supported yet
+     * (currently NVIDIA via nvidia-smi). Values may lag up to 2 s behind.
+     * Missing on agents before 1.3.
+     */
+    gpus: GpuMetrics[];
     uptimeSeconds: number;
 }
 
@@ -199,6 +223,76 @@ export interface PairResponse {
     hostname: string;
     agentVersion: string;
 }
+
+// POST /api/v1/diagnostics
+// Network tests run from the agent's machine. Names are resolved first, so a
+// DNS failure is reported as such rather than as an unreachable host.
+export type DiagnosticRequest =
+    | { type: 'ping'; target: string; /** 1–10, default 5 */ count?: number }
+    | { type: 'traceroute'; target: string }
+    | { type: 'dns'; target: string }
+    | { type: 'tcp'; target: string; port: number };
+
+interface DiagnosticBase {
+    target: string;
+    startedAt: string;
+    durationMs: number;
+}
+
+export interface PingResult extends DiagnosticBase {
+    type: 'ping';
+    /** Resolved IP that was pinged. */
+    address: string;
+    sent: number;
+    received: number;
+    lossPercent: number;
+    /** Round-trip time per probe in ms; `null` for a lost probe. */
+    samples: (number | null)[];
+    minMs: number | null;
+    avgMs: number | null;
+    maxMs: number | null;
+    /** Mean difference between consecutive round-trip times. */
+    jitterMs: number | null;
+}
+
+export interface TraceHop {
+    ttl: number;
+    /** `null` when the hop didn't answer in time. */
+    address: string | null;
+    host: string | null;
+    rttMs: number | null;
+    scope: ConnectionScope | null;
+}
+
+export interface TracerouteResult extends DiagnosticBase {
+    type: 'traceroute';
+    address: string;
+    hops: TraceHop[];
+    /** The destination answered. */
+    reached: boolean;
+}
+
+export interface DnsResult extends DiagnosticBase {
+    type: 'dns';
+    /** Name servers the agent's resolver uses. */
+    servers: string[];
+    /** Direct DNS query (A and AAAA) through those servers. */
+    resolver: { addresses: string[]; durationMs: number; error: string | null };
+    /** The OS lookup apps use (includes the hosts file and caches). */
+    system: { addresses: string[]; durationMs: number; error: string | null };
+}
+
+export interface TcpResult extends DiagnosticBase {
+    type: 'tcp';
+    address: string | null;
+    port: number;
+    connected: boolean;
+    /** Time to connect, or until failure. */
+    connectMs: number | null;
+    error: string | null;
+}
+
+export type DiagnosticResult = PingResult | TracerouteResult | DnsResult | TcpResult;
 
 // Body of every non-2xx response.
 export interface ErrorResponse {

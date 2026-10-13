@@ -58,32 +58,47 @@ const DNS_TTL_MS = 30 * 60_000;
 const DNS_TIMEOUT_MS = 2000;
 const MAX_LOOKUPS_IN_FLIGHT = 16;
 const dnsCache = new Map<string, { name: string | null; at: number }>();
-let lookupsInFlight = 0;
+const pending = new Map<string, Promise<string | null>>();
 
+function lookup(ip: string): Promise<string | null> {
+    const existing = pending.get(ip);
+    if (existing) return existing;
+    let timer: NodeJS.Timeout | undefined;
+    const promise = Promise.race([
+        dns.reverse(ip),
+        new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('timeout')), DNS_TIMEOUT_MS);
+        }),
+    ])
+        .then(
+            (names) => names[0] ?? null,
+            () => null,
+        )
+        .then((name) => {
+            dnsCache.set(ip, { name, at: Date.now() });
+            return name;
+        })
+        .finally(() => {
+            clearTimeout(timer);
+            pending.delete(ip);
+        });
+    pending.set(ip, promise);
+    return promise;
+}
+
+/** Cached name, starting a background lookup when unknown or stale. Never waits. */
 function cachedName(ip: string): string | null {
     const hit = dnsCache.get(ip);
-    // Fresh, or pending (a lookup in flight stores `at` slightly in the future).
     if (hit && Date.now() - hit.at < DNS_TTL_MS) return hit.name;
-    if (lookupsInFlight < MAX_LOOKUPS_IN_FLIGHT) {
-        lookupsInFlight++;
-        dnsCache.set(ip, { name: hit?.name ?? null, at: Date.now() + DNS_TIMEOUT_MS });
-        let timer: NodeJS.Timeout | undefined;
-        Promise.race([
-            dns.reverse(ip),
-            new Promise<never>((_, reject) => {
-                timer = setTimeout(() => reject(new Error('timeout')), DNS_TIMEOUT_MS);
-            }),
-        ])
-            .then(
-                (names) => dnsCache.set(ip, { name: names[0] ?? null, at: Date.now() }),
-                () => dnsCache.set(ip, { name: null, at: Date.now() }),
-            )
-            .finally(() => {
-                clearTimeout(timer);
-                lookupsInFlight--;
-            });
-    }
+    if (pending.size < MAX_LOOKUPS_IN_FLIGHT) void lookup(ip);
     return hit?.name ?? null;
+}
+
+/** Reverse-DNS name of an address, waiting for the lookup (at most ~2 s). Shares the cache. */
+export async function reverseLookup(ip: string): Promise<string | null> {
+    const hit = dnsCache.get(ip);
+    if (hit && Date.now() - hit.at < DNS_TTL_MS) return hit.name;
+    return lookup(ip);
 }
 
 export function buildConnections(raw: RawSockets): ConnectionsResponse {

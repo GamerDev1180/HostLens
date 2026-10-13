@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { buildConnections, platform, sampleCpu, sampleProcesses } from './collectors/index.ts';
+import { buildConnections, platform, sampleCpu, sampleGpus, sampleProcesses } from './collectors/index.ts';
 import type { Config } from './config.ts';
 import { DeviceStore, PairingCodes } from './devices.ts';
+import { parseRequest, runDiagnostic } from './diagnostics.ts';
 import { agentUrls, localOnly, pairingLink } from './pairing.ts';
 import { originGuard, requireToken, type AuthEnv } from './security.ts';
 import type {
@@ -77,11 +78,12 @@ export function createApp(
 
     app.get('/api/v1/metrics', async (c) => {
         // A metric that can't be read degrades to an empty value instead of failing the whole response.
-        const [cpu, memory, disk, network] = await Promise.all([
+        const [cpu, memory, disk, network, gpus] = await Promise.all([
             sampleCpu(),
             platform.memory(),
             platform.disks().catch(() => []),
             platform.network().catch(() => null),
+            sampleGpus().catch(() => []),
         ]);
         const metrics: MetricsResponse = {
             timestamp: new Date().toISOString(),
@@ -89,6 +91,7 @@ export function createApp(
             memory,
             disk,
             network,
+            gpus,
             uptimeSeconds: Math.floor(os.uptime()),
         };
         return c.json(metrics);
@@ -123,6 +126,15 @@ export function createApp(
         const raw = await platform.sockets().catch(() => null);
         if (!raw) return c.json<ErrorResponse>({ error: 'connection list is not available on this platform' }, 501);
         return c.json(buildConnections(raw));
+    });
+
+    app.post('/api/v1/diagnostics', async (c) => {
+        const req = parseRequest(await c.req.json().catch(() => null));
+        if (typeof req === 'string') return c.json<ErrorResponse>({ error: req }, 400);
+        const result = await runDiagnostic(req);
+        if (result === 'busy') return c.json<ErrorResponse>({ error: 'another diagnostic is still running' }, 429);
+        if ('failed' in result) return c.json<ErrorResponse>({ error: result.failed }, 422);
+        return c.json(result);
     });
 
     // ── Pairing & devices ──────────────────────────────────────────

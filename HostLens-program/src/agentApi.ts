@@ -13,8 +13,10 @@ export function agentRequest<T>(
   path: string,
   token: string | null,
   body?: unknown,
+  /** Longer than the default 3 s, for slow calls like traceroute. */
+  timeoutMs?: number,
 ): Promise<T> {
-  return invoke<T>("agent_request", { url, method, path, token, body: body ?? null });
+  return invoke<T>("agent_request", { url, method, path, token, body: body ?? null, timeoutMs: timeoutMs ?? null });
 }
 
 /** GET with a subscription's token. */

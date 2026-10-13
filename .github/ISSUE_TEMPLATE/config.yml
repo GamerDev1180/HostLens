@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/GamerDev1180/HostLens/security/advisories/new
+    about: Please report vulnerabilities (e.g. in pairing or authentication) privately, not as a public issue.

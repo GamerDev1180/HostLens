@@ -24,3 +24,4 @@ export const platform: PlatformCollector =
 export { sampleCpu } from './cpu.ts';
 export { sampleProcesses } from './processes.ts';
 export { buildConnections } from './connections.ts';
+export { sampleGpus } from './gpu.ts';

@@ -20,6 +20,7 @@ const ALLOWED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/devices"),
     ("POST", "/api/v1/pair"),
     ("POST", "/api/v1/pairing-codes"),
+    ("POST", "/api/v1/diagnostics"),
     ("DELETE", "/api/v1/devices/{id}"),
 ];
 
@@ -53,6 +54,7 @@ async fn agent_request(
     path: String,
     token: Option<String>,
     body: Option<serde_json::Value>,
+    timeout_ms: Option<u64>,
 ) -> Result<serde_json::Value, String> {
     if !route_allowed(&method, &path) {
         return Err(format!("unsupported agent request: {method} {path}"));
@@ -63,6 +65,10 @@ async fn agent_request(
     let endpoint = format!("{}{}", url.trim_end_matches('/'), path);
     let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
     let mut req = http.0.request(method, &endpoint);
+    // Polls keep the client's short default; slow calls (traceroute) ask for more.
+    if let Some(ms) = timeout_ms {
+        req = req.timeout(Duration::from_millis(ms.clamp(1000, 120_000)));
+    }
     if let Some(token) = token.filter(|t| !t.is_empty()) {
         req = req.bearer_auth(token);
     }
@@ -405,6 +411,7 @@ mod tests {
     fn only_known_agent_routes_are_allowed() {
         assert!(route_allowed("GET", "/api/v1/metrics/processes?sort=cpu&limit=10"));
         assert!(route_allowed("POST", "/api/v1/pair"));
+        assert!(route_allowed("POST", "/api/v1/diagnostics"));
         assert!(route_allowed("DELETE", "/api/v1/devices/58a0631e-3681-42c1-85ce-f4d3d91be03f"));
         assert!(!route_allowed("DELETE", "/api/v1/devices/"));
         assert!(!route_allowed("DELETE", "/api/v1/devices/../info"));

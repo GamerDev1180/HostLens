@@ -5,7 +5,15 @@ import type { FiveMStatus } from "./fivem";
 export type {
   AgentInfo,
   CpuMetrics,
+  DiagnosticRequest,
+  DiagnosticResult,
   DiskMetrics,
+  DnsResult,
+  GpuMetrics,
+  PingResult,
+  TcpResult,
+  TraceHop,
+  TracerouteResult,
   MemoryMetrics,
   MetricsResponse,
   NetworkInterfaceMetrics,
@@ -50,6 +58,8 @@ export interface AgentState {
   /** Total network throughput history, bytes/s. */
   netRxHistory: number[];
   netTxHistory: number[];
+  /** Per GPU (by position in `metrics.gpus`): utilization and VRAM use, percent. */
+  gpuHistory: { util: number[]; vram: number[] }[];
   lastUpdated: number | null;
 }
 
