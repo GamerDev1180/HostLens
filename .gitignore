@@ -1,0 +1,7 @@
+agent/node_modules
+agent/package-lock.json
+agent/pnpm-lock.yaml
+program/node_modules
+program/package-lock.json
+program/pnpm-lock.yaml
+CLAUDE.md

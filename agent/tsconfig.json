@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "strict": true,
+        "types": [
+            "node"
+        ],
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "moduleDetection": "force",
+        "forceConsistentCasingInFileNames": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
+        "erasableSyntaxOnly": true,
+        "target": "ES2023"
+    }
+}
