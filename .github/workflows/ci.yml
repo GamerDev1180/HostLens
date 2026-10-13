@@ -59,10 +59,6 @@ jobs:
       matrix:
         os: ${{ fromJSON(vars.CI_PLATFORMS || '["windows"]') }}
     runs-on: ${{ matrix.os == 'linux' && fromJSON('["self-hosted","Linux"]') || fromJSON('["self-hosted","Windows"]') }}
-    env:
-      # Outside the workspace, which checkout wipes each run, so incremental
-      # Rust builds survive between runs on the same machine.
-      CARGO_TARGET_DIR: ${{ runner.tool_cache }}/hostlens-target
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -99,4 +95,9 @@ jobs:
       # Offline tests only; the network tests (--ignored) need a live FiveM server.
       - name: Rust tests
         working-directory: HostLens-program/src-tauri
+        env:
+          # Outside the workspace, which checkout wipes each run, so incremental
+          # Rust builds survive between runs on the same machine. (The runner
+          # context only exists at step level, not in job-level env.)
+          CARGO_TARGET_DIR: ${{ runner.tool_cache }}/hostlens-target
         run: cargo test --locked
